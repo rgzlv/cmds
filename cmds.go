@@ -26,6 +26,8 @@ var ErrFlag = errors.New("flag parse error")
 // non-exported functions that it might call in this package so flag parsing
 // errors that occur as a result of calling [flag.FlagSet.Parse] still use the
 // error handling associated with that [flag.FlagSet].
+//
+//go:generate stringer -type ErrorHandling
 type ErrorHandling int
 
 const (
@@ -39,8 +41,20 @@ const (
 	PanicOnError
 )
 
+// RunnerFunc is the function that will be run for the command.
+// The passed in command is the leaf command that matched and the arguments
+// are the arguments that remained after flag parsing.
+// These are passed automatically when running the run method, you can pass
+// any other command and arguments you want if running [Parse] and invoking
+// the Runner separately.
 type RunnerFunc func(cmd *Command, args []string) error
 
+// Command defines a command to run as well as groups it's sub-commands.
+//
+// The root command (the one that will have it's run method invoked) should
+// define it's Runner if there are no Commands for it, otherwise it's unused.
+// The sub-commands should define both a Name and a Runner.
+// The other fields are optional.
 type Command struct {
 	Name          string
 	ShortDesc     string
@@ -52,6 +66,7 @@ type Command struct {
 	Commands []*Command
 }
 
+// Find finds the sub-command with the given name.
 func (cmd *Command) Find(name string) *Command {
 	for _, sub := range cmd.Commands {
 		if sub.Name == name {
@@ -62,6 +77,9 @@ func (cmd *Command) Find(name string) *Command {
 	return nil
 }
 
+// Parse parses the flags and commands in args and returns the leaf command
+// that mached (the last command without set Commands) as well as the arguments
+// that should be passed to it.
 func (cmd *Command) Parse(args []string) (*Command, []string, error) {
 	leafCmd, args, err := cmd.parse(args)
 	if err != nil {
@@ -72,7 +90,9 @@ func (cmd *Command) Parse(args []string) (*Command, []string, error) {
 	return leafCmd, args, err
 }
 
-func (cmd *Command) Run(args []string) error {
+// ParseRun parses the flags and commands in args, same as [Parse] and then
+// runs the [RunnerFunc] for the leaf command.
+func (cmd *Command) ParseRun(args []string) error {
 	leafCmd, args, err := cmd.Parse(args)
 	if err != nil {
 		return err
@@ -91,24 +111,24 @@ func (cmd *Command) parse(args []string) (*Command, []string, error) {
 	rootCmd := cmd
 	for {
 		if cmd.Flags == nil {
-			var flagErrorHandling flag.ErrorHandling
+			var errHandling flag.ErrorHandling
 			if rootCmd.Flags != nil {
-				flagErrorHandling = rootCmd.Flags.ErrorHandling()
+				errHandling = rootCmd.Flags.ErrorHandling()
 			} else {
-				flagErrorHandling = flag.ExitOnError
+				errHandling = flag.ExitOnError
 			}
-			cmd.Flags = flag.NewFlagSet(cmd.Name, flagErrorHandling)
+			cmd.Flags = flag.NewFlagSet(cmd.Name, errHandling)
 			cmd.Flags.Usage = cmd.DefaultUsage()
+		}
+
+		if cmd.Name != rootCmd.Name && len(args) > 0 {
+			args = args[1:]
 		}
 
 		if err := cmd.Flags.Parse(args); err != nil {
 			return nil, nil, fmt.Errorf("%w: %w", ErrFlag, err)
 		}
 		args = cmd.Flags.Args()
-
-		if cmd.Name != rootCmd.Name && len(args) > 0 {
-			args = args[1:]
-		}
 
 		// Is leaf command.
 		if len(cmd.Commands) == 0 {
@@ -132,6 +152,9 @@ func (cmd *Command) parse(args []string) (*Command, []string, error) {
 	}
 }
 
+// Default is the default command with some convenience functions, similar to
+// how the [flag] package has a [flag.CommandLine] for the default
+// [flag.FlagSet].
 var Default = &Command{
 	Name:          filepath.Base(os.Args[0]),
 	ErrorHandling: ExitOnError,
@@ -142,6 +165,7 @@ func init() {
 	Default.Flags.Usage = Default.DefaultUsage()
 }
 
+// Parse runs [Command.Parse] on the [Default] command.
 func Parse() (*Command, []string, error) {
 	leafCmd, args, err := Default.Parse(os.Args[1:])
 	if err != nil {
@@ -151,18 +175,25 @@ func Parse() (*Command, []string, error) {
 	return leafCmd, args, nil
 }
 
+// Flags returns the [flag.FlagSet] of the [Default] command.
 func Flags() *flag.FlagSet {
 	return Default.Flags
 }
 
+// Add adds the commands to the [Default] command.
 func Add(cmds ...*Command) {
 	Default.Commands = append(Default.Commands, cmds...)
 }
 
-func Run() error {
-	return Default.Run(os.Args[1:])
+// ParseRun runs [Command.ParseRun] on the [Default] command.
+func ParseRun() error {
+	return Default.ParseRun(os.Args[1:])
 }
 
+// DefaultUsage returns a usage message for use in [flag.FlagSet.Usage] that
+// outputs the command name on the first line followed by the long description,
+// the sub-command names and short descriptions on the right of the names, and
+// finally the flags for the current command.
 func (cmd *Command) DefaultUsage() func() {
 	return func() {
 		var w io.Writer
