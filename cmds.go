@@ -90,6 +90,10 @@ func (cmd *Command) Parse(args []string) (*Command, []string, error) {
 	return leafCmd, args, err
 }
 
+func (cmd *Command) Run(args []string) error {
+	return cmd.Runner(cmd, args)
+}
+
 // ParseRun parses the flags and commands in args, same as [Parse] and then
 // runs the [RunnerFunc] for the leaf command.
 func (cmd *Command) ParseRun(args []string) error {
@@ -175,6 +179,15 @@ func Parse() (*Command, []string, error) {
 	return leafCmd, args, nil
 }
 
+func Run(args []string) error {
+	return Default.Run(args)
+}
+
+// ParseRun runs [Command.ParseRun] on the [Default] command.
+func ParseRun() error {
+	return Default.ParseRun(os.Args[1:])
+}
+
 // Flags returns the [flag.FlagSet] of the [Default] command.
 func Flags() *flag.FlagSet {
 	return Default.Flags
@@ -183,11 +196,6 @@ func Flags() *flag.FlagSet {
 // Add adds the commands to the [Default] command.
 func Add(cmds ...*Command) {
 	Default.Commands = append(Default.Commands, cmds...)
-}
-
-// ParseRun runs [Command.ParseRun] on the [Default] command.
-func ParseRun() error {
-	return Default.ParseRun(os.Args[1:])
 }
 
 // DefaultUsage returns a usage message for use in [flag.FlagSet.Usage] that
