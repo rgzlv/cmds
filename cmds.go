@@ -91,6 +91,10 @@ func (cmd *Command) Parse(args []string) (*Command, []string, error) {
 }
 
 func (cmd *Command) Run(args []string) error {
+	if cmd.Runner == nil {
+		err := handleError(fmt.Errorf("%w: nil runner", ErrCmd), cmd.ErrorHandling)
+		return err
+	}
 	return handleError(cmd.Runner(cmd, args), cmd.ErrorHandling)
 }
 
