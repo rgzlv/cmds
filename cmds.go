@@ -91,7 +91,7 @@ func (cmd *Command) Parse(args []string) (*Command, []string, error) {
 }
 
 func (cmd *Command) Run(args []string) error {
-	return cmd.Runner(cmd, args)
+	return handleError(cmd.Runner(cmd, args), cmd.ErrorHandling)
 }
 
 // ParseRun parses the flags and commands in args, same as [Parse] and then
@@ -263,6 +263,10 @@ func (cmd *Command) DefaultUsage() func() {
 }
 
 func handleError(err error, errorHandling ErrorHandling) error {
+	if err == nil {
+		return nil
+	}
+
 	if errors.Is(err, ErrCmd) || errors.Is(err, ErrFlag) {
 		err = fmt.Errorf("%w: %w", Err, err)
 	}

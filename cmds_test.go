@@ -1,6 +1,7 @@
 package cmds
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,7 +21,7 @@ func TestRunnerNop(t *testing.T) {
 	cmd := &Command{
 		Runner: nopRunner,
 	}
-	expectNoError(t, cmd.ParseRun(nil))
+	expectErrorNone(t, cmd.ParseRun(nil))
 }
 
 func TestArgs(t *testing.T) {
@@ -31,7 +32,7 @@ func TestArgs(t *testing.T) {
 			return nil
 		},
 	}
-	expectNoError(t, cmd.ParseRun(sentArgs))
+	expectErrorNone(t, cmd.ParseRun(sentArgs))
 }
 
 func TestArgsCmd(t *testing.T) {
@@ -59,7 +60,7 @@ func TestArgsCmd(t *testing.T) {
 	}
 	args := []string{"-c", "sub", "-d"}
 	args = append(args, sentArgs...)
-	expectNoError(t, cmd.ParseRun(args))
+	expectErrorNone(t, cmd.ParseRun(args))
 }
 
 func TestCmdNoFlags(t *testing.T) {
@@ -91,12 +92,12 @@ func TestCmdNoFlags(t *testing.T) {
 
 	expectError(t, cmd.ParseRun(nil))
 
-	expectNoError(t, cmd.ParseRun([]string{"sub0"}))
+	expectErrorNone(t, cmd.ParseRun([]string{"sub0"}))
 	expectTrue(t, sub0Ran)
 	expectFalse(t, sub1Ran)
 	sub0Ran = false
 
-	expectNoError(t, cmd.ParseRun([]string{"sub1"}))
+	expectErrorNone(t, cmd.ParseRun([]string{"sub1"}))
 	expectTrue(t, sub1Ran)
 	expectFalse(t, sub0Ran)
 	sub1Ran = false
@@ -119,10 +120,10 @@ func TestFlagsSimple(t *testing.T) {
 		ErrorHandling: ReturnOnError,
 	}
 
-	expectNoError(t, cmd.ParseRun(nil))
+	expectErrorNone(t, cmd.ParseRun(nil))
 	expectEq(t, fl, flags{})
 
-	expectNoError(t, cmd.ParseRun([]string{"-a", "-b", "42", "-c", "a b"}))
+	expectErrorNone(t, cmd.ParseRun([]string{"-a", "-b", "42", "-c", "a b"}))
 	expectEq(t, fl, flags{
 		A: true,
 		B: 42,
@@ -165,12 +166,61 @@ func TestFlagsCmd(t *testing.T) {
 		},
 	}
 
-	expectNoError(t, cmd.ParseRun([]string{"-a", "sub0", "-b"}))
+	expectErrorNone(t, cmd.ParseRun([]string{"-a", "sub0", "-b"}))
 	expectTrue(t, fl.A)
 	expectTrue(t, fl0.B)
 	expectFalse(t, fl1.C)
 	fl.A = false
 	fl0.B = false
+}
+
+func TestErrReturn(t *testing.T) {
+	errRun := errors.New("run error")
+	cmd := &Command{
+		Flags: func() *flag.FlagSet {
+			fset := flag.NewFlagSet("test", flag.ContinueOnError)
+			fset.Bool("a", false, "")
+			fset.SetOutput(io.Discard)
+			return fset
+		}(),
+
+		ErrorHandling: ReturnOnError,
+
+		Commands: []*Command{
+			{
+				Name: "sub",
+				Runner: func(cmd *Command, args []string) error {
+					if len(args) > 0 && args[0] == "error" {
+						return errRun
+					}
+					return nil
+				},
+			},
+		},
+	}
+
+	err := cmd.ParseRun(nil)
+	expectErrorIs(t, err, Err)
+	expectErrorIs(t, err, ErrCmd)
+	expectErrorNot(t, err, ErrFlag)
+
+	err = cmd.ParseRun([]string{"invalid"})
+	expectErrorIs(t, err, Err)
+	expectErrorIs(t, err, ErrCmd)
+	expectErrorNot(t, err, ErrFlag)
+
+	err = cmd.ParseRun([]string{"-x"})
+	expectErrorIs(t, err, Err)
+	expectErrorNot(t, err, ErrCmd)
+	expectErrorIs(t, err, ErrFlag)
+
+	expectErrorNone(t, cmd.ParseRun([]string{"sub"}))
+
+	err = cmd.ParseRun([]string{"sub", "error"})
+	expectErrorIs(t, err, errRun)
+	expectErrorNot(t, err, Err)
+	expectErrorNot(t, err, ErrCmd)
+	expectErrorNot(t, err, ErrFlag)
 }
 
 func nopRunner(*Command, []string) error {
@@ -217,7 +267,7 @@ func expectError(t *testing.T, err error) {
 	expectErrorValue(t, err, true)
 }
 
-func expectNoError(t *testing.T, err error) {
+func expectErrorNone(t *testing.T, err error) {
 	t.Helper()
 	expectErrorValue(t, err, false)
 }
@@ -229,6 +279,22 @@ func expectErrorValue(t *testing.T, err error, expected bool) {
 	}
 	if err == nil && expected {
 		t.Errorf("expected non-nil error, got \"%v\"", err)
+	}
+}
+
+func expectErrorIs(t *testing.T, err, target error) {
+	t.Helper()
+	expectError(t, err)
+	if !errors.Is(err, target) {
+		t.Errorf("expected error \"%v\", got \"%v\"", target, err)
+	}
+}
+
+func expectErrorNot(t *testing.T, err, target error) {
+	t.Helper()
+	expectError(t, err)
+	if errors.Is(err, target) {
+		t.Errorf("expected error not to be \"%v\", got \"%v\"", target, err)
 	}
 }
 
